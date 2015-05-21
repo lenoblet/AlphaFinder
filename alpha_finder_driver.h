@@ -57,6 +57,7 @@ namespace snemo {
 
   namespace datamodel {
     class tracker_trajectory_data;
+    class tracker_trajectory_solution;
     class particle_track_data;
   }
 
@@ -119,7 +120,16 @@ namespace snemo {
 
 			/// Find the unfitted cluster (cluster with 1 or 2 Geiger hits)
 			void _find_delayed_unfitted_cluster_(const snemo::datamodel::tracker_trajectory_data & tracker_trajectory_data_,
-                                           snemo::datamodel::particle_track_data & particle_track_data_ );
+                                           snemo::datamodel::particle_track_data & particle_track_data_);
+
+			/// Find the delayed unclustered hits
+			void _find_delayed_unclustered_hit_(const snemo::datamodel::tracker_trajectory_data & tracker_trajectory_data_,
+                                          snemo::datamodel::particle_track_data & particle_track_data_);
+
+      /// Dedicated method to find short track
+      void _find_short_track_(const snemo::datamodel::calibrated_tracker_hit::collection_type & hits_,
+                              const snemo::datamodel::tracker_trajectory_solution & solution_,
+                              geomtools::vector_3d & first_vertex_);
 
       /// Dedicated method to "fit" short track
       void _fit_short_track_(const snemo::datamodel::calibrated_tracker_hit::collection_type & hits_,
