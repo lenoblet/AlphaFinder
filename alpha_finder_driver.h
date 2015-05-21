@@ -123,6 +123,10 @@ namespace snemo {
       datatools::logger::priority _logging_priority_; //<! Logging flag
       const geomtools::manager * _geometry_manager_;  //<! The SuperNEMO geometry manager
       const snemo::geometry::locator_plugin * _locator_plugin_; //!< The SuperNEMO locator plugin
+
+      double _minimal_cluster_xy_search_distance_; //!< Minimal distance in XY coordinate between GG hits
+      double _minimal_cluster_z_search_distance_; //!< Minimal distance in Z coordinate between GG hits
+      double _minimal_vertex_distance_; //!< Minimal distance between the prompt vertex and the delayed GG hit
   	};
 
   }  // end of namespace reconstruction

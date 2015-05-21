@@ -17,6 +17,8 @@
 #include <falaise/snemo/datamodels/tracker_trajectory_data.h>
 #include <falaise/snemo/datamodels/particle_track_data.h>
 #include <falaise/snemo/datamodels/calibrated_tracker_hit.h>
+#include <falaise/snemo/datamodels/line_trajectory_pattern.h>
+#include <falaise/snemo/datamodels/helix_trajectory_pattern.h>
 #include <falaise/snemo/geometry/locator_plugin.h>
 #include <falaise/snemo/geometry/gg_locator.h>
 
@@ -128,13 +130,29 @@ namespace snemo {
                   "Found no locator plugin named '" << locator_plugin_name << "'");
       _locator_plugin_ = &geo_mgr.get_plugin<snemo::geometry::locator_plugin>(locator_plugin_name);
 
-      // // Matching distance tolerance for calorimeter association
-      // if (setup_.has_key("matching_tolerance")) {
-      //   _matching_tolerance_ = setup_.fetch_real("matching_tolerance");
-      //   if (! setup_.has_explicit_unit("matching_tolerance")) {
-      //     _matching_tolerance_ *= CLHEP::mm;
-      //   }
-      // }
+      // Minimal distance in XY coordinate between Geiger hits
+      if (setup_.has_key("minimal_cluster_xy_distance")) {
+        _minimal_cluster_xy_search_distance_ = setup_.fetch_real("minimal_cluster_xy_distance");
+        if (! setup_.has_explicit_unit("minimal_cluster_xy_distance")) {
+          _minimal_cluster_xy_search_distance_ *= CLHEP::cm;
+        }
+      }
+
+      // Minimal distance in Z coordinate between Geiger hits
+      if (setup_.has_key("minimal_cluster_z_distance")) {
+        _minimal_cluster_z_search_distance_ = setup_.fetch_real("minimal_cluster_z_distance");
+        if (! setup_.has_explicit_unit("minimal_cluster_z_distance")) {
+          _minimal_cluster_z_search_distance_ *= CLHEP::cm;
+        }
+      }
+
+      // Minimal distance between vertex of the prompt track and delayed GG hit
+      if (setup_.has_key("minimal_vertex_distance")) {
+        _minimal_vertex_distance_ = setup_.fetch_real("minimal_vertex_distance");
+        if (! setup_.has_explicit_unit("minimal_vertex_distance")) {
+          _minimal_vertex_distance_ *= CLHEP::cm;
+        }
+      }
 
       set_initialized(true);
       return;
@@ -152,7 +170,9 @@ namespace snemo {
       _initialized_      = false;
       _logging_priority_ = datatools::logger::PRIO_WARNING;
 
-      // _matching_tolerance_   = 50 * CLHEP::mm;
+      _minimal_cluster_xy_search_distance_ = 21 * CLHEP::cm;
+      _minimal_cluster_z_search_distance_  = 30 * CLHEP::cm;
+      _minimal_vertex_distance_            = 30 * CLHEP::cm;
       return;
     }
 
@@ -162,8 +182,6 @@ namespace snemo {
       DT_LOG_TRACE(get_logging_priority(), "Entering...");
       DT_THROW_IF(! is_initialized(), std::logic_error, "Driver is not initialized !");
 
-      // this->_measure_matching_calorimeters_(calorimeter_hits_, particle_);
-      DT_LOG_TRACE(get_logging_priority(), "coucou");
       this-> _find_delayed_unfitted_cluster_(tracker_trajectory_data_, particle_track_data_);
 
       DT_LOG_TRACE(get_logging_priority(), "Exiting.");
@@ -178,78 +196,201 @@ namespace snemo {
     {
       DT_LOG_TRACE(get_logging_priority(), "Entering...");
 
-      // check if the solution exist
-      if(! tracker_trajectory_data_.has_solutions())
-        {
-          DT_LOG_DEBUG(get_logging_priority(), "No solutions have been found !")
-            return;
-        }
+      // Check if the solution exist
+      if (! tracker_trajectory_data_.has_solutions()) {
+        DT_LOG_DEBUG(get_logging_priority(), "No solutions have been found !");
+        return;
+      }
 
-      // Store first/last Geiger hits of prompt clusters
-      typedef std::pair<snemo::datamodel::calibrated_tracker_hit::handle_type,
-                        snemo::datamodel::calibrated_tracker_hit::handle_type> gg_pair_type;
-      typedef std::vector<gg_pair_type> gg_pair_collection_type;
-      gg_pair_collection_type ggpct;
-
-      // the default solution is chosen
+      // The default solution is chosen
       const snemo::datamodel::tracker_trajectory_solution & a_solution = tracker_trajectory_data_.get_default_solution();
-      const snemo::datamodel::tracker_trajectory_solution::trajectory_col_type & the_trajectories = a_solution.get_trajectories();
+      if (! a_solution.has_unfitted_clusters()) {
+        DT_LOG_DEBUG(get_logging_priority(), "No unfitted clusters has been found !");
+        return;
+      }
+      const snemo::datamodel::tracker_trajectory_solution::cluster_col_type & the_unfitted_clusters
+        = a_solution.get_unfitted_clusters();
 
-      // loop on all the trajectories
-      for(snemo::datamodel::tracker_trajectory_solution::trajectory_col_type::const_iterator itraj = the_trajectories.begin(); itraj!= the_trajectories.end(); ++itraj)
-        {
-          const snemo::datamodel::tracker_trajectory & a_trajectory = itraj->get();
-          if(! a_trajectory.has_cluster())
-            {
-              DT_LOG_DEBUG(get_logging_priority(), "No trajectory have been found !")
-                continue;
-            }
-          const snemo::datamodel::tracker_cluster & a_cluster = a_trajectory.get_cluster();
-          const snemo::datamodel::calibrated_tracker_hit::collection_type & the_gg_hits = a_cluster.get_hits();
+      if (! a_solution.has_trajectories()) {
+        DT_LOG_DEBUG(get_logging_priority(), "No prompt trajectories have been found !");
+        return;
+      }
 
-          gg_pair_type gg_pair;
-          uint32_t layer_min = +std::numeric_limits<uint32_t>::infinity();
-          uint32_t layer_max = -std::numeric_limits<uint32_t>::infinity();
-          // loop on all the geiger hits of the fitted cluster
-          for(snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator igg = the_gg_hits.begin(); igg!= the_gg_hits.end(); ++igg)
-            {
-              const snemo::datamodel::calibrated_tracker_hit & a_gg_hit = igg->get();
-              const geomtools::geom_id & a_gid = a_gg_hit.get_geom_id();
+      // Loop on all the unfitted cluster
+      for (snemo::datamodel::tracker_trajectory_solution::cluster_col_type::const_iterator
+             iclus = the_unfitted_clusters.begin();
+           iclus!= the_unfitted_clusters.end(); ++iclus) {
+        const snemo::datamodel::tracker_cluster & a_delayed_cluster = iclus->get();
 
-              // Extract layer
-              const snemo::geometry::gg_locator & gg_locator = _locator_plugin_->get_gg_locator();
-              const uint32_t layer = gg_locator.extract_layer(a_gid);
-              DT_LOG_TRACE(get_logging_priority(), "Layer of prompt Geiger hit = " << layer);
-              //					double x_wire = a_gg_hit.get_x();
-              //					double y_wire = a_gg_hit.get_y();
-            }
+        // The unfitted cluster has to be delayed
+        if (! a_delayed_cluster.is_delayed()) {
+          DT_LOG_DEBUG(get_logging_priority(), "The unfitted cluster is not delayed !");
+          return;
         }
 
-      const snemo::datamodel::tracker_trajectory_solution::cluster_col_type & the_unfitted_clusters = a_solution.get_unfitted_clusters ();
-      // loop on all the unfitted cluster
-      for(snemo::datamodel::tracker_trajectory_solution::cluster_col_type::const_iterator iclus = the_unfitted_clusters.begin(); iclus!= the_unfitted_clusters.end();
-          ++iclus)
-        {
-          const snemo::datamodel::tracker_cluster & a_delayed_cluster = iclus->get();
+        bool has_associated_alpha = false;
+        geomtools::vector_3d associated_vertex;
+        geomtools::invalidate(associated_vertex);
+        const snemo::datamodel::calibrated_tracker_hit::collection_type & delayed_gg_hits
+          = a_delayed_cluster.get_hits();
+        // Loop on all the geiger hits of the unfitted cluster
+        for (snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator
+               idelayedgg = delayed_gg_hits.begin();
+             idelayedgg != delayed_gg_hits.end(); ++idelayedgg) {
+          const snemo::datamodel::calibrated_tracker_hit & a_delayed_gg_hit = idelayedgg->get();
 
-          // the unfitted cluster has to be delayed
-          if(! a_delayed_cluster.is_delayed())
-            {
-              DT_LOG_DEBUG(get_logging_priority(), "The unfitted cluster is not delayed !")
-                return;
-            }
-          const snemo::datamodel::calibrated_tracker_hit::collection_type & delayed_gg_hits = a_delayed_cluster.get_hits();
+          // Get prompt trajectories
+          const snemo::datamodel::tracker_trajectory_solution::trajectory_col_type & the_trajectories
+            = a_solution.get_trajectories();
+          // Loop on all the trajectories
+          for (snemo::datamodel::tracker_trajectory_solution::trajectory_col_type::const_iterator
+                 itraj = the_trajectories.begin();
+               itraj != the_trajectories.end(); ++itraj) {
+            const snemo::datamodel::tracker_trajectory & a_trajectory = itraj->get();
+            // Look into properties to find the default trajectory. Here,
+            // default means the one with the best chi2. This flag is set by the
+            // 'fitting' module.
+            if (! a_trajectory.get_auxiliaries().has_flag("default")) continue;
 
-          // loop on all the geiger hits of the unfitted cluster
-          for(snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator idelayedgg = delayed_gg_hits.begin(); idelayedgg!= delayed_gg_hits.end();
-              ++idelayedgg)
-            {
-              const snemo::datamodel::calibrated_tracker_hit & a_delayed_gg_hit = idelayedgg->get();
-              double x_delayed_wire = a_delayed_gg_hit.get_x();
-              double y_delayed_wire = a_delayed_gg_hit.get_y();
+            if (! a_trajectory.has_cluster()) {
+              DT_LOG_DEBUG(get_logging_priority(), "No associated clusters have been found !");
+              continue;
             }
+            const snemo::datamodel::tracker_cluster & a_prompt_cluster = a_trajectory.get_cluster();
+            if (a_prompt_cluster.is_delayed()) {
+              DT_LOG_DEBUG(get_logging_priority(), "The cluster is not prompt !");
+              continue;
+            }
+            const snemo::datamodel::calibrated_tracker_hit::collection_type & prompt_gg_hits
+              = a_prompt_cluster.get_hits();
+            for (snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator
+                   ipromptgg = prompt_gg_hits.begin();
+                 ipromptgg != prompt_gg_hits.end(); ++ipromptgg) {
+              const snemo::datamodel::calibrated_tracker_hit & a_prompt_gg_hit = ipromptgg->get();
+              const geomtools::vector_2d a_prompt_position(a_prompt_gg_hit.get_x(),
+                                                           a_prompt_gg_hit.get_y());
+              const geomtools::vector_2d a_delayed_position(a_delayed_gg_hit.get_x(),
+                                                            a_delayed_gg_hit.get_y());
+              const double distance_xy = (a_delayed_position - a_prompt_position).mag();
+              DT_LOG_DEBUG(get_logging_priority(),
+                           "Distance between delayed hit " << a_delayed_gg_hit.get_geom_id()
+                           << " and prompt hit " << a_prompt_gg_hit.get_geom_id() << " = "
+                           << distance_xy/CLHEP::cm << " cm");
+              bool has_minimal_xy_search = false;
+              if (distance_xy < _minimal_cluster_xy_search_distance_) {
+                has_minimal_xy_search = true;
+              }
+
+              const double z_delayed = a_delayed_gg_hit.get_z();
+              const double sigma_z_delayed = a_delayed_gg_hit.get_sigma_z();
+              const double z_prompt = a_prompt_gg_hit.get_z();
+              const double sigma_z_prompt = a_prompt_gg_hit.get_sigma_z();
+              const double distance_z = std::abs(z_delayed - z_prompt);
+              const double sigma = sigma_z_delayed + sigma_z_prompt;
+              DT_LOG_DEBUG(get_logging_priority(),
+                           "Distance between delayed hit " << a_delayed_gg_hit.get_geom_id()
+                           << " and prompt hit " << a_prompt_gg_hit.get_geom_id() << " z = "
+                           << distance_z/CLHEP::cm << " cm - sigma = " << sigma/CLHEP::cm << " cm");
+              bool has_minimal_z_search = false;
+              if ((distance_z - _minimal_cluster_z_search_distance_) < sigma) {
+                has_minimal_z_search = true;
+              }
+
+              if (has_minimal_xy_search && has_minimal_z_search) {
+                DT_LOG_DEBUG(get_logging_priority(), "Find a GG candidate close enough to delayed hit");
+                has_associated_alpha = true;
+                break;
+              }
+            } // end of prompt gg hits
+
+            // Look for trajectories extremities
+            if (has_associated_alpha) {
+              DT_LOG_DEBUG(get_logging_priority(), "Look for trajectory extremities");
+              geomtools::vector_3d first;
+              geomtools::vector_3d last;
+              geomtools::invalidate(first);
+              geomtools::invalidate(last);
+              const snemo::datamodel::base_trajectory_pattern & a_pattern = a_trajectory.get_pattern();
+              const std::string & a_pattern_id = a_pattern.get_pattern_id();
+              if (a_pattern_id == snemo::datamodel::line_trajectory_pattern::pattern_id()) {
+                const snemo::datamodel::line_trajectory_pattern & ltp
+                  = dynamic_cast<const snemo::datamodel::line_trajectory_pattern &>(a_pattern);
+                first = ltp.get_segment().get_first();
+                last  = ltp.get_segment().get_last();
+              } else if (a_pattern_id == snemo::datamodel::helix_trajectory_pattern::pattern_id()) {
+                const snemo::datamodel::helix_trajectory_pattern & htp
+                  = dynamic_cast<const snemo::datamodel::helix_trajectory_pattern &>(a_pattern);
+                first = htp.get_helix().get_first();
+                last  = htp.get_helix().get_last();
+              }
+              const geomtools::vector_3d a_delayed_position(a_delayed_gg_hit.get_x(),
+                                                            a_delayed_gg_hit.get_y(),
+                                                            a_delayed_gg_hit.get_z());
+              if (geomtools::is_valid(first)) {
+                const double distance = (first - a_delayed_position).mag();
+                if (distance < _minimal_vertex_distance_) {
+                  associated_vertex = first;
+                }
+              }
+              if (geomtools::is_valid(last)) {
+                const double distance = (last - a_delayed_position).mag();
+                if (distance < _minimal_vertex_distance_) {
+                  associated_vertex = last;
+                }
+              }
+          }
+          } // end of trajectories
+
+          if (has_associated_alpha) {
+            break;
+          }
+        } // end of delayed hits
+
+        if (geomtools::is_valid(associated_vertex)) {
+          // Add short alpha particle track
+          snemo::datamodel::particle_track::handle_type hPT(new snemo::datamodel::particle_track);
+          snemo::datamodel::particle_track & a_short_alpha = hPT.grab();
+          a_short_alpha.set_track_id(particle_track_data_.get_number_of_particles());
+          a_short_alpha.set_charge(snemo::datamodel::particle_track::undefined);
+          particle_track_data_.add_particle(hPT);
+
+          // "Fit" short alpha trajectory
+          // Loop on all the delayed geiger hits to compute distance between hit
+          // and associated vertex
+          geomtools::vector_3d other_vertex;
+          geomtools::invalidate(other_vertex);
+          double max_distance = 0.0 * CLHEP::cm;
+          for (snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator
+                 idelayedgg = delayed_gg_hits.begin();
+               idelayedgg != delayed_gg_hits.end(); ++idelayedgg) {
+            const snemo::datamodel::calibrated_tracker_hit & a_delayed_gg_hit = idelayedgg->get();
+            const geomtools::vector_3d a_delayed_position(a_delayed_gg_hit.get_x(),
+                                                          a_delayed_gg_hit.get_y(),
+                                                          a_delayed_gg_hit.get_z());
+            const double distance = (associated_vertex - a_delayed_position).mag();
+            if (distance > max_distance) {
+              other_vertex = a_delayed_position;
+              max_distance = distance;
+            }
+          } // end of delayed geiger hits
+
+          if (geomtools::is_valid(other_vertex)) {
+            // Create new 'tracker_trajectory' handle:
+            // snemo::datamodel::tracker_trajectory_handle
+            // snemo::datamodel::tracker_trajectory new_trajectory;
+            // snemo::datamodel::line_trajectory_pattern ltp;
+            // ltp.grab_segment().set_first(associated_vertex);
+            // ltp.grab_segment().set_last(other_vertex);
+            // const snemo::datamodel::tracker_trajectory::handle_pattern h_pattern;// = &ltp;
+            // // h_pattern.reset(ltp);
+            // a_short_alpha.set_trajectory_handle(h_pattern);
+          }
         }
+      } // end of delayed cluster
+
+
       DT_LOG_TRACE(get_logging_priority(), "Exiting...");
+      return;
     }
 
 
