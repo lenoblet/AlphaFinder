@@ -16,7 +16,6 @@
 // This project (Falaise):
 #include <falaise/snemo/datamodels/tracker_trajectory_data.h>
 #include <falaise/snemo/datamodels/particle_track_data.h>
-#include <falaise/snemo/datamodels/calibrated_tracker_hit.h>
 #include <falaise/snemo/datamodels/line_trajectory_pattern.h>
 #include <falaise/snemo/datamodels/helix_trajectory_pattern.h>
 #include <falaise/snemo/geometry/locator_plugin.h>
@@ -355,28 +354,13 @@ namespace snemo {
           particle_track_data_.add_particle(hPT);
 
           // "Fit" short alpha trajectory
-          // Loop on all the delayed geiger hits to compute distance between hit
-          // and associated vertex
           geomtools::vector_3d other_vertex;
           geomtools::invalidate(other_vertex);
-          double max_distance = 0.0 * CLHEP::cm;
-          for (snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator
-                 idelayedgg = delayed_gg_hits.begin();
-               idelayedgg != delayed_gg_hits.end(); ++idelayedgg) {
-            const snemo::datamodel::calibrated_tracker_hit & a_delayed_gg_hit = idelayedgg->get();
-            const geomtools::vector_3d a_delayed_position(a_delayed_gg_hit.get_x(),
-                                                          a_delayed_gg_hit.get_y(),
-                                                          a_delayed_gg_hit.get_z());
-            const double distance = (associated_vertex - a_delayed_position).mag();
-            if (distance > max_distance) {
-              other_vertex = a_delayed_position;
-              max_distance = distance;
-            }
-          } // end of delayed geiger hits
-
+          this->_fit_short_track_(delayed_gg_hits, associated_vertex, other_vertex);
           if (geomtools::is_valid(other_vertex)) {
             // Create new 'tracker_trajectory' handle:
-            // snemo::datamodel::tracker_trajectory_handle
+            snemo::datamodel::tracker_trajectory::handle_type htrajectory;
+            htrajectory.reset(new snemo::datamodel::tracker_trajectory);
             // snemo::datamodel::tracker_trajectory new_trajectory;
             // snemo::datamodel::line_trajectory_pattern ltp;
             // ltp.grab_segment().set_first(associated_vertex);
@@ -394,9 +378,27 @@ namespace snemo {
     }
 
 
-
-
-
+    void alpha_finder_driver::_fit_short_track_(const snemo::datamodel::calibrated_tracker_hit::collection_type & hits_,
+                                                const geomtools::vector_3d & first_vertex_,
+                                                geomtools::vector_3d & last_vertex_)
+    {
+      double max_distance = 0.0 * CLHEP::cm;
+      // Loop on all the delayed geiger hits to compute distance between hit
+      // and associated vertex
+      for (snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator
+             ihit = hits_.begin(); ihit != hits_.end(); ++ihit) {
+        const snemo::datamodel::calibrated_tracker_hit & a_hit = ihit->get();
+        const geomtools::vector_3d a_hit_position(a_hit.get_x(),
+                                                  a_hit.get_y(),
+                                                  a_hit.get_z());
+        const double distance = (first_vertex_ - a_hit_position).mag();
+        if (distance > max_distance) {
+          last_vertex_ = a_hit_position;
+          max_distance = distance;
+        }
+      } // end of delayed geiger hits
+      return;
+    }
 
     // static
     void alpha_finder_driver::init_ocd(datatools::object_configuration_description & ocd_)

@@ -38,6 +38,10 @@
 // Third party:
 // - Bayeux/datatools:
 #include <bayeux/datatools/logger.h>
+// - Bayeux/geomtools:
+#include <bayeux/geomtools/clhep.h>
+// - Falaise:
+#include <falaise/snemo/datamodels/calibrated_tracker_hit.h>
 
 namespace datatools {
   class properties;
@@ -117,16 +121,20 @@ namespace snemo {
 			void _find_delayed_unfitted_cluster_(const snemo::datamodel::tracker_trajectory_data & tracker_trajectory_data_,
                                            snemo::datamodel::particle_track_data & particle_track_data_ );
 
+      /// Dedicated method to "fit" short track
+      void _fit_short_track_(const snemo::datamodel::calibrated_tracker_hit::collection_type & hits_,
+                             const geomtools::vector_3d & first_vertex_,
+                             geomtools::vector_3d & last_vertex_);
     private:
 
-      bool _initialized_;                             //<! Initialize flag
-      datatools::logger::priority _logging_priority_; //<! Logging flag
-      const geomtools::manager * _geometry_manager_;  //<! The SuperNEMO geometry manager
+      bool _initialized_;                                       //<! Initialize flag
+      datatools::logger::priority _logging_priority_;           //<! Logging flag
+      const geomtools::manager * _geometry_manager_;            //<! The SuperNEMO geometry manager
       const snemo::geometry::locator_plugin * _locator_plugin_; //!< The SuperNEMO locator plugin
 
-      double _minimal_cluster_xy_search_distance_; //!< Minimal distance in XY coordinate between GG hits
-      double _minimal_cluster_z_search_distance_; //!< Minimal distance in Z coordinate between GG hits
-      double _minimal_vertex_distance_; //!< Minimal distance between the prompt vertex and the delayed GG hit
+      double _minimal_cluster_xy_search_distance_;              //!< Minimal distance in XY coordinate between GG hits
+      double _minimal_cluster_z_search_distance_;               //!< Minimal distance in Z coordinate between GG hits
+      double _minimal_vertex_distance_;                         //!< Minimal distance between the prompt vertex and the delayed GG hit
   	};
 
   }  // end of namespace reconstruction
