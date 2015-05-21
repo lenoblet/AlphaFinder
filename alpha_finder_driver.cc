@@ -16,6 +16,9 @@
 // This project (Falaise):
 #include <falaise/snemo/datamodels/tracker_trajectory_data.h>
 #include <falaise/snemo/datamodels/particle_track_data.h>
+#include <falaise/snemo/datamodels/calibrated_tracker_hit.h>
+#include <falaise/snemo/geometry/locator_plugin.h>
+#include <falaise/snemo/geometry/gg_locator.h>
 
 namespace snemo {
 
@@ -99,6 +102,32 @@ namespace snemo {
                   "Invalid logging priority level for geometry manager !");
       set_logging_priority(lp);
 
+     // Get geometry locator plugin
+      const geomtools::manager & geo_mgr = get_geometry_manager();
+      std::string locator_plugin_name;
+      if (setup_.has_key("locator_plugin_name")) {
+        locator_plugin_name = setup_.fetch_string("locator_plugin_name");
+      } else {
+        // If no locator plugin name is set, then search for the first one
+        const geomtools::manager::plugins_dict_type & plugins = geo_mgr.get_plugins();
+        for (geomtools::manager::plugins_dict_type::const_iterator ip = plugins.begin();
+             ip != plugins.end();
+             ip++) {
+          const std::string & plugin_name = ip->first;
+          if (geo_mgr.is_plugin_a<snemo::geometry::locator_plugin>(plugin_name)) {
+            DT_LOG_DEBUG(get_logging_priority(), "Find locator plugin with name = " << plugin_name);
+            locator_plugin_name = plugin_name;
+            break;
+          }
+        }
+      }
+      // Access to a given plugin by name and type :
+      DT_THROW_IF(! geo_mgr.has_plugin(locator_plugin_name) ||
+                  ! geo_mgr.is_plugin_a<snemo::geometry::locator_plugin>(locator_plugin_name),
+                  std::logic_error,
+                  "Found no locator plugin named '" << locator_plugin_name << "'");
+      _locator_plugin_ = &geo_mgr.get_plugin<snemo::geometry::locator_plugin>(locator_plugin_name);
+
       // // Matching distance tolerance for calorimeter association
       // if (setup_.has_key("matching_tolerance")) {
       //   _matching_tolerance_ = setup_.fetch_real("matching_tolerance");
@@ -134,10 +163,99 @@ namespace snemo {
       DT_THROW_IF(! is_initialized(), std::logic_error, "Driver is not initialized !");
 
       // this->_measure_matching_calorimeters_(calorimeter_hits_, particle_);
+      DT_LOG_TRACE(get_logging_priority(), "coucou");
+      this-> _find_delayed_unfitted_cluster_(tracker_trajectory_data_, particle_track_data_);
 
       DT_LOG_TRACE(get_logging_priority(), "Exiting.");
       return;
     }
+    
+    
+    
+    
+		void alpha_finder_driver::_find_delayed_unfitted_cluster_(const snemo::datamodel::tracker_trajectory_data & tracker_trajectory_data_,
+     																													snemo::datamodel::particle_track_data & particle_track_data_)
+    {
+      DT_LOG_TRACE(get_logging_priority(), "Entering...");
+			
+			// check if the solution exist
+			if(! tracker_trajectory_data_.has_solutions())
+			{
+				DT_LOG_DEBUG(get_logging_priority(), "No solutions have been found !")
+				return;
+			}
+			
+			// Store first/last Geiger hits of prompt clusters
+			typedef std::pair<snemo::datamodel::calibrated_tracker_hit::handle_type,
+												snemo::datamodel::calibrated_tracker_hit::handle_type> gg_pair_type;
+			typedef std::vector<gg_pair_type> gg_pair_collection_type;
+			gg_pair_collection_type ggpct;
+			
+			// the default solution is chosen
+			const snemo::datamodel::tracker_trajectory_solution & a_solution = tracker_trajectory_data_.get_default_solution();
+			const snemo::datamodel::tracker_trajectory_solution::trajectory_col_type & the_trajectories = a_solution.get_trajectories();
+				
+			// loop on all the trajectories
+			for(snemo::datamodel::tracker_trajectory_solution::trajectory_col_type::const_iterator itraj = the_trajectories.begin(); itraj!= the_trajectories.end(); ++itraj)
+			{
+				const snemo::datamodel::tracker_trajectory & a_trajectory = itraj->get();
+				if(! a_trajectory.has_cluster())
+				{
+					DT_LOG_DEBUG(get_logging_priority(), "No trajectory have been found !")
+					continue;
+				}
+				const snemo::datamodel::tracker_cluster & a_cluster = a_trajectory.get_cluster();
+				const snemo::datamodel::calibrated_tracker_hit::collection_type & the_gg_hits = a_cluster.get_hits();
+				
+				gg_pair_type gg_pair;
+				uint32_t layer_min = +std::numeric_limits<uint32_t>::infinity();						
+				uint32_t layer_max = -std::numeric_limits<uint32_t>::infinity();						
+				// loop on all the geiger hits of the fitted cluster
+				for(snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator igg = the_gg_hits.begin(); igg!= the_gg_hits.end(); ++igg)
+				{
+					const snemo::datamodel::calibrated_tracker_hit & a_gg_hit = igg->get();
+	        const geomtools::geom_id & a_gid = a_gg_hit.get_geom_id();
+
+					// Extract layer
+        	const snemo::geometry::gg_locator & gg_locator = _locator_plugin_->get_gg_locator();
+        	const uint32_t layer = gg_locator.extract_layer(a_gid);
+ 					DT_LOG_TRACE(get_logging_priority(), "Layer of prompt Geiger hit = " << layer);
+//					double x_wire = a_gg_hit.get_x();
+//					double y_wire = a_gg_hit.get_y();
+				}				
+			}
+				
+				const snemo::datamodel::tracker_trajectory_solution::cluster_col_type & the_unfitted_clusters = a_solution.get_unfitted_clusters ();
+				// loop on all the unfitted cluster
+				for(snemo::datamodel::tracker_trajectory_solution::cluster_col_type::const_iterator iclus = the_unfitted_clusters.begin(); iclus!= the_unfitted_clusters.end();
+				++iclus)
+				{
+					const snemo::datamodel::tracker_cluster & a_delayed_cluster = iclus->get();
+					
+					// the unfitted cluster has to be delayed
+					if(! a_delayed_cluster.is_delayed())
+					{
+						DT_LOG_DEBUG(get_logging_priority(), "The unfitted cluster is not delayed !")
+						return;
+					}
+					const snemo::datamodel::calibrated_tracker_hit::collection_type & delayed_gg_hits = a_delayed_cluster.get_hits();
+				
+					// loop on all the geiger hits of the unfitted cluster
+					for(snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator idelayedgg = delayed_gg_hits.begin(); idelayedgg!= delayed_gg_hits.end();
+					++idelayedgg)
+					{
+						const snemo::datamodel::calibrated_tracker_hit & a_delayed_gg_hit = idelayedgg->get();
+						double x_delayed_wire = a_delayed_gg_hit.get_x();
+						double y_delayed_wire = a_delayed_gg_hit.get_y();
+					}			
+				}
+		DT_LOG_TRACE(get_logging_priority(), "Exiting...");
+    }
+    
+ 
+    
+    
+    
 
     // static
     void alpha_finder_driver::init_ocd(datatools::object_configuration_description & ocd_)

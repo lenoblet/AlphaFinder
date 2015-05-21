@@ -46,6 +46,11 @@ namespace geomtools {
   class manager;
 }
 namespace snemo {
+  
+  namespace geometry {
+    class locator_plugin;
+  }
+
 
   namespace datamodel {
     class tracker_trajectory_data;
@@ -113,12 +118,17 @@ namespace snemo {
       // void _measure_matching_calorimeters_(const snemo::datamodel::calibrated_data::calorimeter_hit_collection_type & calorimeter_hits_,
       //                                      snemo::datamodel::particle_track & particle_);
 
+			// Find the unfitted cluster (cluster with 1 or 2 Geiger hits)
+			void _find_delayed_unfitted_cluster_(const snemo::datamodel::tracker_trajectory_data & tracker_trajectory_data_,
+																							snemo::datamodel::particle_track_data & particle_track_data_ );
+
     private:
 
       bool _initialized_;                             //<! Initialize flag
       datatools::logger::priority _logging_priority_; //<! Logging flag
       const geomtools::manager * _geometry_manager_;  //<! The SuperNEMO geometry manager
-    };
+      const snemo::geometry::locator_plugin * _locator_plugin_; //!< The SuperNEMO locator plugin
+  	};
 
   }  // end of namespace reconstruction
 
