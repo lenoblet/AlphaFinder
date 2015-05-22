@@ -26,6 +26,13 @@ namespace snemo {
 
   namespace reconstruction {
 
+    const std::string & alpha_finder_driver::short_alpha_key()
+    {
+      static const std::string s("short_alpha");
+      return s;
+    }
+
+
     const std::string & alpha_finder_driver::get_id()
     {
       static const std::string s("AFD");
@@ -234,37 +241,19 @@ namespace snemo {
 
         geomtools::vector_3d associated_vertex;
         geomtools::invalidate(associated_vertex);
-        this->_find_short_track_(delayed_gg_hits, a_solution, associated_vertex);
-        if (! geomtools::is_valid(associated_vertex)) {
-          DT_LOG_DEBUG(get_logging_priority(), "No association with prompt cluster has been found !");
-          continue;
-        }
+        this->_find_short_track_(delayed_gg_hits, a_solution, particle_track_data_);
 
-        // Add short alpha particle track
-        snemo::datamodel::particle_track::handle_type hPT(new snemo::datamodel::particle_track);
-        snemo::datamodel::particle_track & a_short_alpha = hPT.grab();
-        a_short_alpha.set_track_id(particle_track_data_.get_number_of_particles());
-        a_short_alpha.set_charge(snemo::datamodel::particle_track::undefined);
-        particle_track_data_.add_particle(hPT);
-
-        // "Fit" short alpha trajectory
-        geomtools::vector_3d other_vertex;
-        geomtools::invalidate(other_vertex);
-        this->_fit_short_track_(delayed_gg_hits, associated_vertex, other_vertex);
-        if (geomtools::is_valid(other_vertex)) {
-          // Create new 'tracker_trajectory' handle:
-          snemo::datamodel::tracker_trajectory::handle_type htrajectory;
-          htrajectory.reset(new snemo::datamodel::tracker_trajectory);
-          snemo::datamodel::tracker_trajectory & a_trajectory = htrajectory.grab();
+        // Add tracker cluster handle to trajectory
+        snemo::datamodel::particle_track_data::particle_collection_type & particles
+          = particle_track_data_.grab_particles();
+        snemo::datamodel::particle_track & a_particle = particles.back().grab();
+        const datatools::properties & aux = a_particle.get_auxiliaries();
+        if (aux.has_flag(alpha_finder_driver::short_alpha_key()) && a_particle.has_trajectory()) {
+          snemo::datamodel::tracker_trajectory & a_trajectory = a_particle.grab_trajectory();
           a_trajectory.set_cluster_handle(*iclus);
-          snemo::datamodel::line_trajectory_pattern * a_line
-            = new snemo::datamodel::line_trajectory_pattern;
-          a_trajectory.set_pattern_handle(a_line);
-          a_line->grab_segment().set_first(associated_vertex);
-          a_line->grab_segment().set_last(other_vertex);
-          a_short_alpha.set_trajectory_handle(htrajectory);
         }
-      } // end of delayed cluster
+
+       } // end of delayed cluster
 
       DT_LOG_TRACE(get_logging_priority(), "Exiting...");
       return;
@@ -296,37 +285,7 @@ namespace snemo {
       const snemo::datamodel::calibrated_tracker_hit::collection_type & unclustered_gg_hits
         = a_clustering_solution.get_unclustered_hits();
 
-      geomtools::vector_3d associated_vertex;
-      geomtools::invalidate(associated_vertex);
-      this->_find_short_track_(unclustered_gg_hits, a_solution, associated_vertex);
-      if (! geomtools::is_valid(associated_vertex)) {
-        DT_LOG_DEBUG(get_logging_priority(), "No association with prompt cluster has been found !");
-        return;
-      }
-
-      // Add short alpha particle track
-      snemo::datamodel::particle_track::handle_type hPT(new snemo::datamodel::particle_track);
-      snemo::datamodel::particle_track & a_short_alpha = hPT.grab();
-      a_short_alpha.set_track_id(particle_track_data_.get_number_of_particles());
-      a_short_alpha.set_charge(snemo::datamodel::particle_track::undefined);
-      particle_track_data_.add_particle(hPT);
-
-      // "Fit" short alpha trajectory
-      geomtools::vector_3d other_vertex;
-      geomtools::invalidate(other_vertex);
-      this->_fit_short_track_(unclustered_gg_hits, associated_vertex, other_vertex);
-      if (geomtools::is_valid(other_vertex)) {
-        // Create new 'tracker_trajectory' handle:
-        snemo::datamodel::tracker_trajectory::handle_type htrajectory;
-        htrajectory.reset(new snemo::datamodel::tracker_trajectory);
-        snemo::datamodel::tracker_trajectory & a_trajectory = htrajectory.grab();
-        snemo::datamodel::line_trajectory_pattern * a_line
-          = new snemo::datamodel::line_trajectory_pattern;
-        a_trajectory.set_pattern_handle(a_line);
-        a_line->grab_segment().set_first(associated_vertex);
-        a_line->grab_segment().set_last(other_vertex);
-        a_short_alpha.set_trajectory_handle(htrajectory);
-      }
+     this->_find_short_track_(unclustered_gg_hits, a_solution, particle_track_data_, false);
 
       DT_LOG_TRACE(get_logging_priority(), "Exiting...");
       return;
@@ -334,8 +293,11 @@ namespace snemo {
 
     void alpha_finder_driver::_find_short_track_(const snemo::datamodel::calibrated_tracker_hit::collection_type & hits_,
                                                  const snemo::datamodel::tracker_trajectory_solution & solution_,
-                                                 geomtools::vector_3d & associated_vertex_)
+                                                 snemo::datamodel::particle_track_data & particle_track_data_,
+                                                 const bool hits_from_cluster)
     {
+      geomtools::vector_3d associated_vertex;
+      geomtools::invalidate(associated_vertex);
       bool has_associated_alpha = false;
       // Loop on all the geiger hits of the unfitted cluster
       for (snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator
@@ -344,6 +306,12 @@ namespace snemo {
 
         if (! a_delayed_gg_hit.is_delayed() ||
             a_delayed_gg_hit.get_delayed_time() < _minimal_delayed_time_) continue;
+
+        if (! hits_from_cluster) {
+          // Reset values
+          geomtools::invalidate(associated_vertex);
+          has_associated_alpha = false;
+        }
 
         // Get prompt trajectories
         if (! solution_.has_trajectories()) {
@@ -439,21 +407,45 @@ namespace snemo {
             if (geomtools::is_valid(first)) {
               const double distance = (first - a_delayed_position).mag();
               if (distance < _minimal_vertex_distance_) {
-                associated_vertex_ = first;
+                associated_vertex = first;
               }
             }
             if (geomtools::is_valid(last)) {
               const double distance = (last - a_delayed_position).mag();
               if (distance < _minimal_vertex_distance_) {
-                associated_vertex_ = last;
+                associated_vertex = last;
               }
             }
           }
         } // end of trajectories
 
-        if (has_associated_alpha) {
-          break;
+        if (has_associated_alpha && geomtools::is_valid(associated_vertex)) {
+          // Build a new particle track
+          this->_build_alpha_particle_track_(hits_, associated_vertex, particle_track_data_);
+          if (hits_from_cluster) {
+            // If hits come from unfitted tracker cluster no more processing
+            break;
+          } else {
+            // If hits come from unclustered hits then add a new particle
+            // Add special tracker cluster handle to trajectory
+            // Create a new cluster with only one delayed geiger hits and associate it
+            // to the particle track trajectory
+            snemo::datamodel::particle_track_data::particle_collection_type & particles
+              = particle_track_data_.grab_particles();
+            snemo::datamodel::particle_track & a_particle = particles.back().grab();
+            const datatools::properties & aux = a_particle.get_auxiliaries();
+            if (aux.has_flag(alpha_finder_driver::short_alpha_key()) && a_particle.has_trajectory()) {
+              snemo::datamodel::tracker_trajectory & a_trajectory = a_particle.grab_trajectory();
+              snemo::datamodel::tracker_cluster::handle_type a_cluster;
+              a_cluster.reset(new snemo::datamodel::tracker_cluster);
+              a_cluster.grab().make_delayed();
+              snemo::datamodel::calibrated_tracker_hit::collection_type & hits = a_cluster.grab().grab_hits();
+              hits.push_back(*ihit);
+              a_trajectory.set_cluster_handle(a_cluster);
+            }
+          }
         }
+
       } // end of delayed hits
       return;
     }
@@ -480,6 +472,42 @@ namespace snemo {
       } // end of delayed geiger hits
       return;
     }
+
+    void alpha_finder_driver::_build_alpha_particle_track_(const snemo::datamodel::calibrated_tracker_hit::collection_type & hits_,
+                                                           const geomtools::vector_3d & first_vertex_,
+                                                           snemo::datamodel::particle_track_data & particle_track_data_)
+    {
+      // Add short alpha particle track
+      snemo::datamodel::particle_track::handle_type hPT(new snemo::datamodel::particle_track);
+      snemo::datamodel::particle_track & a_short_alpha = hPT.grab();
+      a_short_alpha.set_track_id(particle_track_data_.get_number_of_particles());
+      a_short_alpha.set_charge(snemo::datamodel::particle_track::undefined);
+      a_short_alpha.grab_auxiliaries().store_flag(alpha_finder_driver::short_alpha_key());
+      particle_track_data_.add_particle(hPT);
+
+      // "Fit" short alpha trajectory
+      geomtools::vector_3d last_vertex;
+      geomtools::invalidate(last_vertex);
+      this->_fit_short_track_(hits_, first_vertex_, last_vertex);
+      if (! geomtools::is_valid(last_vertex)) {
+        DT_LOG_DEBUG(get_logging_priority(), "Fit of short alpha track fails !");
+        return;
+      }
+
+      // Create new 'tracker_trajectory' handle:
+      snemo::datamodel::tracker_trajectory::handle_type htrajectory;
+      htrajectory.reset(new snemo::datamodel::tracker_trajectory);
+      snemo::datamodel::tracker_trajectory & a_trajectory = htrajectory.grab();
+      snemo::datamodel::line_trajectory_pattern * a_line
+        = new snemo::datamodel::line_trajectory_pattern;
+      a_trajectory.set_pattern_handle(a_line);
+      a_line->grab_segment().set_first(first_vertex_);
+      a_line->grab_segment().set_last(last_vertex);
+      a_short_alpha.set_trajectory_handle(htrajectory);
+
+      return;
+    }
+
 
     // static
     void alpha_finder_driver::init_ocd(datatools::object_configuration_description & ocd_)
@@ -582,8 +610,7 @@ DOCD_CLASS_IMPLEMENT_LOAD_BEGIN(snemo::reconstruction::alpha_finder_driver,ocd_)
   ocd_.set_class_name("snemo::reconstruction::alpha_finder_driver");
   ocd_.set_class_description("A driver class for finding short alpha track");
   ocd_.set_class_library("Falaise_ChargedParticleTracking");
-  ocd_.set_class_documentation("This driver extracts the short alpha tracks. \n"
-                               );
+  ocd_.set_class_documentation("This driver extracts the short alpha tracks from delayed Geiger hits.");
 
   // Invoke specific OCD support :
   ::snemo::reconstruction::alpha_finder_driver::init_ocd(ocd_);
