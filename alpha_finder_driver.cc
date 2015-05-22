@@ -19,8 +19,11 @@
 #include <falaise/snemo/datamodels/particle_track_data.h>
 #include <falaise/snemo/datamodels/line_trajectory_pattern.h>
 #include <falaise/snemo/datamodels/helix_trajectory_pattern.h>
+
 #include <falaise/snemo/geometry/locator_plugin.h>
-#include <falaise/snemo/geometry/gg_locator.h>
+#include <falaise/snemo/geometry/calo_locator.h>
+#include <falaise/snemo/geometry/xcalo_locator.h>
+#include <falaise/snemo/geometry/gveto_locator.h>
 
 namespace snemo {
 
@@ -488,23 +491,104 @@ namespace snemo {
       // "Fit" short alpha trajectory
       geomtools::vector_3d last_vertex;
       geomtools::invalidate(last_vertex);
-      this->_fit_short_track_(hits_, first_vertex_, last_vertex);
+      const geomtools::vector_3d & first_vertex = first_vertex_;
+      this->_fit_short_track_(hits_, first_vertex, last_vertex);
       if (! geomtools::is_valid(last_vertex)) {
         DT_LOG_DEBUG(get_logging_priority(), "Fit of short alpha track fails !");
         return;
       }
 
       // Create new 'tracker_trajectory' handle:
-      snemo::datamodel::tracker_trajectory::handle_type htrajectory;
-      htrajectory.reset(new snemo::datamodel::tracker_trajectory);
+      snemo::datamodel::tracker_trajectory::handle_type
+        htrajectory(new snemo::datamodel::tracker_trajectory);
       snemo::datamodel::tracker_trajectory & a_trajectory = htrajectory.grab();
+      // Set trajectory geom_id using the first geiger hit of the associated
+      // cluster
+      get_geometry_manager().get_id_mgr().make_id("tracker_submodule",
+                                                  a_trajectory.grab_geom_id());
+      get_geometry_manager().get_id_mgr().extract(hits_.front().get().get_geom_id(),
+                                                  a_trajectory.grab_geom_id());
+      // Set trajectory pattern
       snemo::datamodel::line_trajectory_pattern * a_line
         = new snemo::datamodel::line_trajectory_pattern;
       a_trajectory.set_pattern_handle(a_line);
-      a_line->grab_segment().set_first(first_vertex_);
+      a_line->grab_segment().set_first(first_vertex);
       a_line->grab_segment().set_last(last_vertex);
       a_short_alpha.set_trajectory_handle(htrajectory);
 
+      // Determine vertices origin : previous process should have determine a
+      // 'first' vertex associated to the prompt track and a 'last' vertex
+      // associated to the center of a Geiger cells. The latter will be set to a
+      // 'VERTEX_ON_WIRE'; the former will be set given its relative position
+      // wrt to detector geometry.
+      snemo::datamodel::particle_track::vertex_collection_type & vertices = a_short_alpha.grab_vertices();
+      {
+        // Vertex on wire
+        snemo::datamodel::particle_track::handle_spot hBS(new geomtools::blur_spot);
+        vertices.push_back(hBS);
+        geomtools::blur_spot & spot = hBS.grab();
+        spot.set_hit_id(vertices.size());
+        spot.grab_auxiliaries().update(snemo::datamodel::particle_track::vertex_type_key(),
+                                       snemo::datamodel::particle_track::vertex_on_wire_label());
+        spot.set_blur_dimension(geomtools::blur_spot::dimension_three);
+        spot.set_position(last_vertex);
+      }
+      {
+        // Check first vertex origin
+        const geomtools::geom_id & gid = a_trajectory.get_geom_id();
+        const geomtools::id_mgr & id_mgr = get_geometry_manager().get_id_mgr();
+        if (!id_mgr.has(gid, "module") || !id_mgr.has(gid, "side")) {
+          DT_LOG_ERROR(get_logging_priority(), "Trajectory geom_id " << gid << " has no 'module' or 'side' address!");
+          return;
+        }
+        DT_LOG_TRACE(get_logging_priority(), "Trajectory geom_id = " << gid);
+        const int side = id_mgr.get(gid, "side");
+        // Set the calorimeter locators :
+        const snemo::geometry::calo_locator  & calo_locator  = _locator_plugin_->get_calo_locator();
+        const snemo::geometry::xcalo_locator & xcalo_locator = _locator_plugin_->get_xcalo_locator();
+        const snemo::geometry::gveto_locator & gveto_locator = _locator_plugin_->get_gveto_locator();
+        // TODO: Add source strip locator...
+
+        const double xcalo_bd[2]
+          = {calo_locator.get_wall_window_x(snemo::geometry::utils::SIDE_BACK),
+             calo_locator.get_wall_window_x(snemo::geometry::utils::SIDE_FRONT)};
+        const double ycalo_bd[2]
+          = {xcalo_locator.get_wall_window_y(side, snemo::geometry::xcalo_locator::WALL_LEFT),
+             xcalo_locator.get_wall_window_y(side, snemo::geometry::xcalo_locator::WALL_RIGHT)};
+        const double zcalo_bd[2]
+          = {gveto_locator.get_wall_window_z(side, snemo::geometry::gveto_locator::WALL_BOTTOM),
+             gveto_locator.get_wall_window_z(side, snemo::geometry::gveto_locator::WALL_TOP)};
+
+        const double epsilon = 1e-5 * CLHEP::mm;
+        std::string vertex_label;
+        if (first_vertex.x() < epsilon) {
+          DT_LOG_DEBUG(get_logging_priority(), "Alpha track has vertex on source foil");
+          vertex_label = snemo::datamodel::particle_track::vertex_on_source_foil_label();
+        } else if (first_vertex.x() - xcalo_bd[0] < epsilon ||
+                   first_vertex.x() - xcalo_bd[1] < epsilon) {
+          DT_LOG_DEBUG(get_logging_priority(), "Alpha track has vertex on main wall");
+          vertex_label = snemo::datamodel::particle_track::vertex_on_main_calorimeter_label();
+        } else if (first_vertex.y() - ycalo_bd[0] < epsilon ||
+                   first_vertex.y() - ycalo_bd[1] < epsilon) {
+          DT_LOG_DEBUG(get_logging_priority(), "Alpha track has vertex on X-wall");
+          vertex_label = snemo::datamodel::particle_track::vertex_on_x_calorimeter_label();
+        } else if (first_vertex.z() - zcalo_bd[0] < epsilon ||
+                   first_vertex.z() - zcalo_bd[1] < epsilon) {
+          DT_LOG_DEBUG(get_logging_priority(), "Alpha track has vertex on gamma-veto");
+          vertex_label = snemo::datamodel::particle_track::vertex_on_gamma_veto_label();
+        } else {
+          DT_LOG_DEBUG(get_logging_priority(), "Alpha track has vertex on wire");
+          vertex_label = snemo::datamodel::particle_track::vertex_on_wire_label();
+        }
+        snemo::datamodel::particle_track::handle_spot hBS(new geomtools::blur_spot);
+        vertices.push_back(hBS);
+        geomtools::blur_spot & spot = hBS.grab();
+        spot.set_hit_id(vertices.size());
+        spot.grab_auxiliaries().update(snemo::datamodel::particle_track::vertex_type_key(),
+                                       vertex_label);
+        spot.set_blur_dimension(geomtools::blur_spot::dimension_three);
+        spot.set_position(first_vertex);
+      }
       return;
     }
 
