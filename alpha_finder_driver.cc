@@ -130,6 +130,14 @@ namespace snemo {
                   "Found no locator plugin named '" << locator_plugin_name << "'");
       _locator_plugin_ = &geo_mgr.get_plugin<snemo::geometry::locator_plugin>(locator_plugin_name);
 
+      // Minimal anode time to consider Geiger hit as delayed
+      if (setup_.has_key("minimal_delayed_time")) {
+        _minimal_delayed_time_ = setup_.fetch_real("minimal_delayed_time");
+        if (! setup_.has_explicit_unit("minimal_delayed_time")) {
+          _minimal_delayed_time_ *= CLHEP::microsecond;
+        }
+      }
+
       // Minimal distance in XY coordinate between Geiger hits
       if (setup_.has_key("minimal_cluster_xy_distance")) {
         _minimal_cluster_xy_search_distance_ = setup_.fetch_real("minimal_cluster_xy_distance");
@@ -170,6 +178,7 @@ namespace snemo {
       _initialized_      = false;
       _logging_priority_ = datatools::logger::PRIO_WARNING;
 
+      _minimal_delayed_time_ = 15 * CLHEP::microsecond;
       _minimal_cluster_xy_search_distance_ = 21 * CLHEP::cm;
       _minimal_cluster_z_search_distance_  = 30 * CLHEP::cm;
       _minimal_vertex_distance_            = 30 * CLHEP::cm;
@@ -332,7 +341,9 @@ namespace snemo {
       for (snemo::datamodel::calibrated_tracker_hit::collection_type::const_iterator
              ihit = hits_.begin(); ihit != hits_.end(); ++ihit) {
         const snemo::datamodel::calibrated_tracker_hit & a_delayed_gg_hit = ihit->get();
-        if (! a_delayed_gg_hit.is_delayed()) continue;
+
+        if (! a_delayed_gg_hit.is_delayed() ||
+            a_delayed_gg_hit.get_delayed_time() < _minimal_delayed_time_) continue;
 
         // Get prompt trajectories
         if (! solution_.has_trajectories()) {
@@ -477,26 +488,87 @@ namespace snemo {
       // Prefix "AFD" stands for "Alpha Finder Driver" :
       datatools::logger::declare_ocd_logging_configuration(ocd_, "fatal", "AFD.");
 
-      // {
-      //   // Description of the 'VED.matching_tolerance' configuration property :
-      //   datatools::configuration_property_description & cpd
-      //     = ocd_.add_property_info();
-      //   cpd.set_name_pattern("VED.matching_tolerance")
-      //     .set_from("snemo::reconstruction::alpha_finder_driver")
-      //     .set_terse_description("Set matching length tolerance between vertex track and calo. block")
-      //     .set_traits(datatools::TYPE_REAL)
-      //     .set_mandatory(false)
-      //     .set_explicit_unit(true)
-      //     .set_unit_label("length")
-      //     .set_unit_symbol("mm")
-      //     .set_default_value_real(50.)
-      //     .add_example("Set the default value::                           \n"
-      //                  "                                                  \n"
-      //                  "  CAD.matching_tolerance : real as length = 50 mm \n"
-      //                  "                                                  \n"
-      //                  )
-      //     ;
-      // }
+      {
+        // Description of the 'AFD.minimal_delayed_time' configuration property :
+        datatools::configuration_property_description & cpd
+          = ocd_.add_property_info();
+        cpd.set_name_pattern("AFD.minimal_delayed_time")
+          .set_from("snemo::reconstruction::alpha_finder_driver")
+          .set_terse_description("Set minimal delayed time to consider Geiger hit")
+          .set_traits(datatools::TYPE_REAL)
+          .set_mandatory(false)
+          .set_explicit_unit(true)
+          .set_unit_label("time")
+          .set_unit_symbol("us")
+          .set_default_value_real(15.)
+          .add_example("Set the default value::                           \n"
+                       "                                                  \n"
+                       "  AFD.minimal_delayed_time : real as time = 15 us \n"
+                       "                                                  \n"
+                       )
+          ;
+      }
+      {
+        // Description of the 'AFD.minimal_cluster_xy_search_distance' configuration property :
+        datatools::configuration_property_description & cpd
+          = ocd_.add_property_info();
+        cpd.set_name_pattern("AFD.minimal_cluster_xy_search_distance")
+          .set_from("snemo::reconstruction::alpha_finder_driver")
+          .set_terse_description("Set minimal distance in XY coordinates to associate delayed hit with prompt hit")
+          .set_traits(datatools::TYPE_REAL)
+          .set_mandatory(false)
+          .set_explicit_unit(true)
+          .set_unit_label("length")
+          .set_unit_symbol("cm")
+          .set_default_value_real(21.)
+          .add_example("Set the default value::                                           \n"
+                       "                                                                  \n"
+                       "  AFD.minimal_cluster_xy_search_distance : real as length = 21 cm \n"
+                       "                                                                  \n"
+                       )
+          ;
+      }
+      {
+        // Description of the 'AFD.minimal_cluster_z_search_distance' configuration property :
+        datatools::configuration_property_description & cpd
+          = ocd_.add_property_info();
+        cpd.set_name_pattern("AFD.minimal_cluster_z_search_distance")
+          .set_from("snemo::reconstruction::alpha_finder_driver")
+          .set_terse_description("Set minimal distance in Z coordinate to associate delayed hit with prompt hit")
+          .set_traits(datatools::TYPE_REAL)
+          .set_mandatory(false)
+          .set_explicit_unit(true)
+          .set_unit_label("length")
+          .set_unit_symbol("cm")
+          .set_default_value_real(21.)
+          .add_example("Set the default value::                                          \n"
+                       "                                                                 \n"
+                       "  AFD.minimal_cluster_z_search_distance : real as length = 30 cm \n"
+                       "                                                                 \n"
+                       )
+          ;
+      }
+      {
+        // Description of the 'AFD.minimal_vertex_distance' configuration property :
+        datatools::configuration_property_description & cpd
+          = ocd_.add_property_info();
+        cpd.set_name_pattern("AFD.minimal_vertex_distance")
+          .set_from("snemo::reconstruction::alpha_finder_driver")
+          .set_terse_description("Set minimal distance between Geiger hit and prompt track extremities")
+          .set_traits(datatools::TYPE_REAL)
+          .set_mandatory(false)
+          .set_explicit_unit(true)
+          .set_unit_label("length")
+          .set_unit_symbol("cm")
+          .set_default_value_real(30.)
+          .add_example("Set the default value::                                \n"
+                       "                                                       \n"
+                       "  AFD.minimal_vertex_distance : real as length = 30 cm \n"
+                       "                                                       \n"
+                       )
+          ;
+      }
+
     }
 
   }  // end of namespace reconstruction

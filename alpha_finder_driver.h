@@ -142,9 +142,10 @@ namespace snemo {
       const geomtools::manager * _geometry_manager_;            //<! The SuperNEMO geometry manager
       const snemo::geometry::locator_plugin * _locator_plugin_; //!< The SuperNEMO locator plugin
 
-      double _minimal_cluster_xy_search_distance_;              //!< Minimal distance in XY coordinate between GG hits
-      double _minimal_cluster_z_search_distance_;               //!< Minimal distance in Z coordinate between GG hits
-      double _minimal_vertex_distance_;                         //!< Minimal distance between the prompt vertex and the delayed GG hit
+      double _minimal_delayed_time_;               //!< Minimal Geiger hit delayed time
+      double _minimal_cluster_xy_search_distance_; //!< Minimal distance in XY coordinate between GG hits
+      double _minimal_cluster_z_search_distance_;  //!< Minimal distance in Z coordinate between GG hits
+      double _minimal_vertex_distance_;            //!< Minimal distance between the prompt vertex and the delayed GG hit
   	};
 
   }  // end of namespace reconstruction
