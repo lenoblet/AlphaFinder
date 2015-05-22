@@ -308,7 +308,12 @@ namespace snemo {
         const snemo::datamodel::calibrated_tracker_hit & a_delayed_gg_hit = ihit->get();
 
         if (! a_delayed_gg_hit.is_delayed() ||
-            a_delayed_gg_hit.get_delayed_time() < _minimal_delayed_time_) continue;
+            a_delayed_gg_hit.get_delayed_time() < _minimal_delayed_time_) {
+          DT_LOG_TRACE(get_logging_priority(), "Geiger is prompt or delayed time is too low ("
+                       << a_delayed_gg_hit.get_delayed_time()/CLHEP::microsecond << "<"
+                       << _minimal_delayed_time_/CLHEP::microsecond << " us)");
+          continue;
+        }
 
         if (! hits_from_cluster) {
           // Reset values
@@ -423,27 +428,30 @@ namespace snemo {
         } // end of trajectories
 
         if (has_associated_alpha && geomtools::is_valid(associated_vertex)) {
-          // Build a new particle track
-          this->_build_alpha_particle_track_(hits_, associated_vertex, particle_track_data_);
           if (hits_from_cluster) {
+            // Build a new particle track
+            this->_build_alpha_particle_track_(hits_, associated_vertex, particle_track_data_);
             // If hits come from unfitted tracker cluster no more processing
             break;
           } else {
             // If hits come from unclustered hits then add a new particle
-            // Add special tracker cluster handle to trajectory
             // Create a new cluster with only one delayed geiger hits and associate it
             // to the particle track trajectory
+            snemo::datamodel::tracker_cluster::handle_type a_cluster(new snemo::datamodel::tracker_cluster);
+            a_cluster.grab().make_delayed();
+            snemo::datamodel::calibrated_tracker_hit::collection_type & hits = a_cluster.grab().grab_hits();
+            hits.push_back(*ihit);
+
+            // Build a new particle track
+            this->_build_alpha_particle_track_(hits, associated_vertex, particle_track_data_);
+
+            // Add special tracker cluster handle to trajectory
             snemo::datamodel::particle_track_data::particle_collection_type & particles
               = particle_track_data_.grab_particles();
             snemo::datamodel::particle_track & a_particle = particles.back().grab();
             const datatools::properties & aux = a_particle.get_auxiliaries();
             if (aux.has_flag(alpha_finder_driver::short_alpha_key()) && a_particle.has_trajectory()) {
               snemo::datamodel::tracker_trajectory & a_trajectory = a_particle.grab_trajectory();
-              snemo::datamodel::tracker_cluster::handle_type a_cluster;
-              a_cluster.reset(new snemo::datamodel::tracker_cluster);
-              a_cluster.grab().make_delayed();
-              snemo::datamodel::calibrated_tracker_hit::collection_type & hits = a_cluster.grab().grab_hits();
-              hits.push_back(*ihit);
               a_trajectory.set_cluster_handle(a_cluster);
             }
           }
@@ -452,7 +460,6 @@ namespace snemo {
       } // end of delayed hits
       return;
     }
-
 
     void alpha_finder_driver::_fit_short_track_(const snemo::datamodel::calibrated_tracker_hit::collection_type & hits_,
                                                 const geomtools::vector_3d & first_vertex_,
@@ -596,7 +603,6 @@ namespace snemo {
     // static
     void alpha_finder_driver::init_ocd(datatools::object_configuration_description & ocd_)
     {
-
       // Prefix "AFD" stands for "Alpha Finder Driver" :
       datatools::logger::declare_ocd_logging_configuration(ocd_, "fatal", "AFD.");
 
