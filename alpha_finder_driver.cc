@@ -201,8 +201,8 @@ namespace snemo {
       DT_LOG_TRACE(get_logging_priority(), "Entering...");
       DT_THROW_IF(! is_initialized(), std::logic_error, "Driver is not initialized !");
 
-      this-> _find_delayed_unfitted_cluster_(tracker_trajectory_data_, particle_track_data_);
-      this-> _find_delayed_unclustered_hit_(tracker_trajectory_data_, particle_track_data_);
+      this->_find_delayed_unfitted_cluster_(tracker_trajectory_data_, particle_track_data_);
+      this->_find_delayed_unclustered_hit_(tracker_trajectory_data_, particle_track_data_);
 
       DT_LOG_TRACE(get_logging_priority(), "Exiting.");
       return;
@@ -247,15 +247,16 @@ namespace snemo {
         this->_find_short_track_(delayed_gg_hits, a_solution, particle_track_data_);
 
         // Add tracker cluster handle to trajectory
-        snemo::datamodel::particle_track_data::particle_collection_type & particles
-          = particle_track_data_.grab_particles();
-        snemo::datamodel::particle_track & a_particle = particles.back().grab();
-        const datatools::properties & aux = a_particle.get_auxiliaries();
-        if (aux.has_flag(alpha_finder_driver::short_alpha_key()) && a_particle.has_trajectory()) {
-          snemo::datamodel::tracker_trajectory & a_trajectory = a_particle.grab_trajectory();
-          a_trajectory.set_cluster_handle(*iclus);
+        if (particle_track_data_.has_particles()) {
+          snemo::datamodel::particle_track_data::particle_collection_type & particles
+            = particle_track_data_.grab_particles();
+          snemo::datamodel::particle_track & a_particle = particles.back().grab();
+          const datatools::properties & aux = a_particle.get_auxiliaries();
+          if (aux.has_flag(alpha_finder_driver::short_alpha_key()) && a_particle.has_trajectory()) {
+            snemo::datamodel::tracker_trajectory & a_trajectory = a_particle.grab_trajectory();
+            a_trajectory.set_cluster_handle(*iclus);
+          }
         }
-
        } // end of delayed cluster
 
       DT_LOG_TRACE(get_logging_priority(), "Exiting...");
