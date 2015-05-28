@@ -569,19 +569,19 @@ namespace snemo {
 
         const double epsilon = 1e-5 * CLHEP::mm;
         std::string vertex_label;
-        if (first_vertex.x() < epsilon) {
+        if (std::abs(first_vertex.x()) < epsilon) {
           DT_LOG_DEBUG(get_logging_priority(), "Alpha track has vertex on source foil");
           vertex_label = snemo::datamodel::particle_track::vertex_on_source_foil_label();
-        } else if (first_vertex.x() - xcalo_bd[0] < epsilon ||
-                   first_vertex.x() - xcalo_bd[1] < epsilon) {
+        } else if (std::abs(first_vertex.x() - xcalo_bd[0]) < epsilon ||
+                   std::abs(first_vertex.x() - xcalo_bd[1]) < epsilon) {
           DT_LOG_DEBUG(get_logging_priority(), "Alpha track has vertex on main wall");
           vertex_label = snemo::datamodel::particle_track::vertex_on_main_calorimeter_label();
-        } else if (first_vertex.y() - ycalo_bd[0] < epsilon ||
-                   first_vertex.y() - ycalo_bd[1] < epsilon) {
+        } else if (std::abs(first_vertex.y() - ycalo_bd[0]) < epsilon ||
+                   std::abs(first_vertex.y() - ycalo_bd[1]) < epsilon) {
           DT_LOG_DEBUG(get_logging_priority(), "Alpha track has vertex on X-wall");
           vertex_label = snemo::datamodel::particle_track::vertex_on_x_calorimeter_label();
-        } else if (first_vertex.z() - zcalo_bd[0] < epsilon ||
-                   first_vertex.z() - zcalo_bd[1] < epsilon) {
+        } else if (std::abs(first_vertex.z() - zcalo_bd[0]) < epsilon ||
+                   std::abs(first_vertex.z() - zcalo_bd[1]) < epsilon) {
           DT_LOG_DEBUG(get_logging_priority(), "Alpha track has vertex on gamma-veto");
           vertex_label = snemo::datamodel::particle_track::vertex_on_gamma_veto_label();
         } else {
